@@ -1,0 +1,55 @@
+services:
+  # MySQL Database Service
+  mysql-db:
+    image: mysql:8.0
+    container_name: mysql-api-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: tarea_api
+      MYSQL_USER: api_user
+      MYSQL_PASSWORD: api_password
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./database.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - api-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+
+  # Node.js API Service
+  api:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: nodejs-api
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      DB_HOST: mysql-db
+      DB_USER: api_user
+      DB_PASSWORD: api_password
+      DB_NAME: tarea_api
+      DB_PORT: 3306
+      NODE_ENV: production
+    depends_on:
+      mysql-db:
+        condition: service_healthy
+    networks:
+      - api-network
+    volumes:
+      - .:/app
+      - /app/node_modules
+
+volumes:
+  mysql_data:
+    driver: local
+
+networks:
+  api-network:
+    driver: bridge
