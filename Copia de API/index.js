@@ -9,7 +9,7 @@ const mysql = require('mysql2/promise');
 
 // Crea una pool de conexiones con la información de tu base de datos
 const pool = mysql.createPool({
-    host: 'db-emilio-campos.c2p6uc8s6fih.us-east-1.rds.amazonaws.com',
+    host: 'database-emilio-campos.cx8w0m66yrcx.us-east-2.rds.amazonaws.com',
     user: 'admin',
     password: 'YokedSkate62',
     database: 'tarea_api'
