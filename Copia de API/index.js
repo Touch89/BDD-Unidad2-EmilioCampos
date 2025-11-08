@@ -186,6 +186,261 @@ app.post("/usuarios", (req, res) => {
         });
 });
 
+// POST api/purchases - Crear una nueva compra
+app.post("/api/purchases", async (req, res) => {
+    const { user_id, status, details } = req.body;
+
+    // Validaciones
+    if (!user_id || !status || !details || !Array.isArray(details)) {
+        return res.status(400).json({
+            error: 'user_id, status y details son obligatorios'
+        });
+    }
+
+    if (details.length === 0) {
+        return res.status(400).json({
+            error: 'Mínimo debe de haber un producto en la compra'
+        });
+    }
+
+    if (details.length > 5) {
+        return res.status(400).json({
+            error: 'No se pueden guardar más de 5 productos por compra'
+        });
+    }
+
+    const connection = await pool.getConnection();
+    
+    try {
+        await connection.beginTransaction();
+
+        // Verificar stock y calcular total
+        let total = 0;
+        for (const detail of details) {
+            const [products] = await connection.query(
+                'SELECT stock, price FROM products WHERE id = ?',
+                [detail.product_id]
+            );
+
+            if (products.length === 0) {
+                await connection.rollback();
+                return res.status(404).json({
+                    error: `Producto con ID ${detail.product_id} no encontrado`
+                });
+            }
+
+            if (products[0].stock < detail.quantity) {
+                await connection.rollback();
+                return res.status(400).json({
+                    error: `No hay stock disponible para el producto ${detail.product_id}`
+                });
+            }
+
+            total += detail.price * detail.quantity;
+        }
+
+        if (total > 3500) {
+            await connection.rollback();
+            return res.status(400).json({
+                error: 'El total de la compra no puede pasar la cantidad de $3500'
+            });
+        }
+
+        // Insertar compra
+        const [purchaseResult] = await connection.query(
+            'INSERT INTO purchases (user_id, total, status, purchase_date) VALUES (?, ?, ?, NOW())',
+            [user_id, total, status]
+        );
+
+        const purchaseId = purchaseResult.insertId;
+
+        // Insertar detalles y descontar stock
+        for (const detail of details) {
+            const subtotal = detail.price * detail.quantity;
+            
+            await connection.query(
+                'INSERT INTO purchase_details (purchase_id, product_id, quantity, price, subtotal) VALUES (?, ?, ?, ?, ?)',
+                [purchaseId, detail.product_id, detail.quantity, detail.price, subtotal]
+            );
+
+            await connection.query(
+                'UPDATE products SET stock = stock - ? WHERE id = ?',
+                [detail.quantity, detail.product_id]
+            );
+        }
+
+        await connection.commit();
+
+        res.status(201).json({
+            message: 'Compra creada exitosamente',
+            purchase_id: purchaseId,
+            total: total,
+            status: status
+        });
+
+    } catch (err) {
+        await connection.rollback();
+        console.error('Error creating purchase', err);
+        res.status(500).json({
+            error: 'Error interno del servidor al crear la compra'
+        });
+    } finally {
+        connection.release();
+    }
+});
+
+// PUT api/purchases/:id - Actualizar una compra existente
+app.put("/api/purchases/:id", async (req, res) => {
+    const purchaseId = req.params.id;
+    const { status, details } = req.body;
+
+    const connection = await pool.getConnection();
+    
+    try {
+        await connection.beginTransaction();
+
+        // Verificar que la compra existe
+        const [purchases] = await connection.query(
+            'SELECT * FROM purchases WHERE id = ?',
+            [purchaseId]
+        );
+
+        if (purchases.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({
+                error: 'Compra no encontrada'
+            });
+        }
+
+        const purchase = purchases[0];
+
+        // No se puede modificar si ya está completada
+        if (purchase.status === 'COMPLETED') {
+            await connection.rollback();
+            return res.status(400).json({
+                error: 'Si una compra ya se encuentra en estatus "COMPLETED", no podrá modificarse'
+            });
+        }
+
+        // Validaciones
+        if (details && details.length > 5) {
+            await connection.rollback();
+            return res.status(400).json({
+                error: 'No se pueden guardar más de 5 productos por compra'
+            });
+        }
+
+        // Obtener detalles actuales para devolver el stock
+        const [currentDetails] = await connection.query(
+            'SELECT * FROM purchase_details WHERE purchase_id = ?',
+            [purchaseId]
+        );
+
+        // Devolver stock de los productos actuales
+        for (const detail of currentDetails) {
+            await connection.query(
+                'UPDATE products SET stock = stock + ? WHERE id = ?',
+                [detail.quantity, detail.product_id]
+            );
+        }
+
+        // Eliminar detalles actuales
+        await connection.query(
+            'DELETE FROM purchase_details WHERE purchase_id = ?',
+            [purchaseId]
+        );
+
+        let total = 0;
+
+        // Si se proporcionan nuevos detalles
+        if (details && details.length > 0) {
+            // Verificar stock y calcular nuevo total
+            for (const detail of details) {
+                const [products] = await connection.query(
+                    'SELECT stock, price FROM products WHERE id = ?',
+                    [detail.product_id]
+                );
+
+                if (products.length === 0) {
+                    await connection.rollback();
+                    return res.status(404).json({
+                        error: `Producto con ID ${detail.product_id} no encontrado`
+                    });
+                }
+
+                if (products[0].stock < detail.quantity) {
+                    await connection.rollback();
+                    return res.status(400).json({
+                        error: `No hay stock disponible para el producto ${detail.product_id}`
+                    });
+                }
+
+                total += detail.price * detail.quantity;
+            }
+
+            if (total > 3500) {
+                await connection.rollback();
+                return res.status(400).json({
+                    error: 'El total de la compra no puede pasar la cantidad de $3500'
+                });
+            }
+
+            // Insertar nuevos detalles y descontar stock
+            for (const detail of details) {
+                const subtotal = detail.price * detail.quantity;
+                
+                await connection.query(
+                    'INSERT INTO purchase_details (purchase_id, product_id, quantity, price, subtotal) VALUES (?, ?, ?, ?, ?)',
+                    [purchaseId, detail.product_id, detail.quantity, detail.price, subtotal]
+                );
+
+                await connection.query(
+                    'UPDATE products SET stock = stock - ? WHERE id = ?',
+                    [detail.quantity, detail.product_id]
+                );
+            }
+        }
+
+        // Actualizar compra
+        const updateFields = [];
+        const updateValues = [];
+
+        if (status !== undefined) {
+            updateFields.push('status = ?');
+            updateValues.push(status);
+        }
+
+        if (details && details.length > 0) {
+            updateFields.push('total = ?');
+            updateValues.push(total);
+        }
+
+        if (updateFields.length > 0) {
+            updateValues.push(purchaseId);
+            await connection.query(
+                `UPDATE purchases SET ${updateFields.join(', ')} WHERE id = ?`,
+                updateValues
+            );
+        }
+
+        await connection.commit();
+
+        res.json({
+            message: 'Compra actualizada exitosamente',
+            purchase_id: purchaseId
+        });
+
+    } catch (err) {
+        await connection.rollback();
+        console.error('Error updating purchase', err);
+        res.status(500).json({
+            error: 'Error interno del servidor al actualizar la compra'
+        });
+    } finally {
+        connection.release();
+    }
+});
+
 app.listen(port, () => {
     console.log(`App listening at http://localhost:${port}`);
 });
