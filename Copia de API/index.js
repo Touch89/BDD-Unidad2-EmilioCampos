@@ -441,6 +441,198 @@ app.put("/api/purchases/:id", async (req, res) => {
     }
 });
 
+// DELETE api/purchases/:id - Eliminar una compra
+app.delete("/api/purchases/:id", async (req, res) => {
+    const purchaseId = req.params.id;
+
+    const connection = await pool.getConnection();
+    
+    try {
+        await connection.beginTransaction();
+
+        // Verificar que la compra existe
+        const [purchases] = await connection.query(
+            'SELECT * FROM purchases WHERE id = ?',
+            [purchaseId]
+        );
+
+        if (purchases.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({
+                error: 'Compra no encontrada'
+            });
+        }
+
+        const purchase = purchases[0];
+
+        // No se pueden borrar compras completadas
+        if (purchase.status === 'COMPLETED') {
+            await connection.rollback();
+            return res.status(400).json({
+                error: 'No se pueden borrar compra que ya se encuentren en estatus "COMPLETED"'
+            });
+        }
+
+        // Obtener detalles para devolver el stock
+        const [details] = await connection.query(
+            'SELECT * FROM purchase_details WHERE purchase_id = ?',
+            [purchaseId]
+        );
+
+        // Devolver stock de los productos
+        for (const detail of details) {
+            await connection.query(
+                'UPDATE products SET stock = stock + ? WHERE id = ?',
+                [detail.quantity, detail.product_id]
+            );
+        }
+
+        // Eliminar detalles
+        await connection.query(
+            'DELETE FROM purchase_details WHERE purchase_id = ?',
+            [purchaseId]
+        );
+
+        // Eliminar compra
+        await connection.query(
+            'DELETE FROM purchases WHERE id = ?',
+            [purchaseId]
+        );
+
+        await connection.commit();
+
+        res.json({
+            message: 'Compra eliminada exitosamente',
+            purchase_id: purchaseId
+        });
+
+    } catch (err) {
+        await connection.rollback();
+        console.error('Error deleting purchase', err);
+        res.status(500).json({
+            error: 'Error interno del servidor al eliminar la compra'
+        });
+    } finally {
+        connection.release();
+    }
+});
+
+// GET api/purchases - Obtener todas las compras con sus detalles
+app.get("/api/purchases", async (req, res) => {
+    try {
+        // Obtener todas las compras con información del usuario
+        const [purchases] = await pool.query(`
+            SELECT 
+                p.id,
+                p.user_id,
+                u.name as user,
+                p.total,
+                p.status,
+                DATE_FORMAT(p.purchase_date, '%Y-%m-%dT%H:%i:%s.%fZ') as purchase_date
+            FROM purchases p
+            LEFT JOIN users u ON p.user_id = u.id
+            ORDER BY p.id
+        `);
+
+        // Para cada compra, obtener sus detalles
+        const purchasesWithDetails = await Promise.all(
+            purchases.map(async (purchase) => {
+                const [details] = await pool.query(`
+                    SELECT 
+                        pd.id,
+                        pd.product_id,
+                        pr.name as product,
+                        pd.quantity,
+                        pd.price,
+                        pd.subtotal
+                    FROM purchase_details pd
+                    LEFT JOIN products pr ON pd.product_id = pr.id
+                    WHERE pd.purchase_id = ?
+                    ORDER BY pd.id
+                `, [purchase.id]);
+
+                return {
+                    id: purchase.id,
+                    user: purchase.user,
+                    total: purchase.total,
+                    status: purchase.status,
+                    purchase_date: purchase.purchase_date,
+                    details: details
+                };
+            })
+        );
+
+        res.json(purchasesWithDetails);
+
+    } catch (err) {
+        console.error('Error retrieving purchases', err);
+        res.status(500).json({
+            error: 'Error interno del servidor al obtener las compras'
+        });
+    }
+});
+
+// GET api/purchases/:id - Obtener una compra específica por su ID
+app.get("/api/purchases/:id", async (req, res) => {
+    const purchaseId = req.params.id;
+
+    try {
+        // Obtener la compra con información del usuario
+        const [purchases] = await pool.query(`
+            SELECT 
+                p.id,
+                p.user_id,
+                u.name as user,
+                p.total,
+                p.status,
+                DATE_FORMAT(p.purchase_date, '%Y-%m-%dT%H:%i:%s.%fZ') as purchase_date
+            FROM purchases p
+            LEFT JOIN users u ON p.user_id = u.id
+            WHERE p.id = ?
+        `, [purchaseId]);
+
+        if (purchases.length === 0) {
+            return res.status(404).json({
+                error: 'Compra no encontrada'
+            });
+        }
+
+        const purchase = purchases[0];
+
+        // Obtener los detalles de la compra
+        const [details] = await pool.query(`
+            SELECT 
+                pd.id,
+                pd.product_id,
+                pr.name as product,
+                pd.quantity,
+                pd.price,
+                pd.subtotal
+            FROM purchase_details pd
+            LEFT JOIN products pr ON pd.product_id = pr.id
+            WHERE pd.purchase_id = ?
+            ORDER BY pd.id
+        `, [purchaseId]);
+
+        const purchaseWithDetails = {
+            id: purchase.id,
+            user: purchase.user,
+            total: purchase.total,
+            status: purchase.status,
+            purchase_date: purchase.purchase_date,
+            details: details
+        };
+
+        res.json(purchaseWithDetails);
+
+    } catch (err) {
+        console.error('Error retrieving purchase', err);
+        res.status(500).json({
+            error: 'Error interno del servidor al obtener la compra'
+        });
+    }
+});
+
 app.listen(port, () => {
     console.log(`App listening at http://localhost:${port}`);
 });
