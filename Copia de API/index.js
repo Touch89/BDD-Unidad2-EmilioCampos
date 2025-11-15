@@ -534,35 +534,7 @@ app.get("/api/purchases", async (req, res) => {
             ORDER BY p.id
         `);
 
-        // Para cada compra, obtener sus detalles
-        const purchasesWithDetails = await Promise.all(
-            purchases.map(async (purchase) => {
-                const [details] = await pool.query(`
-                    SELECT 
-                        pd.id,
-                        pd.product_id,
-                        pr.name as product,
-                        pd.quantity,
-                        pd.price,
-                        pd.subtotal
-                    FROM purchase_details pd
-                    LEFT JOIN products pr ON pd.product_id = pr.id
-                    WHERE pd.purchase_id = ?
-                    ORDER BY pd.id
-                `, [purchase.id]);
-
-                return {
-                    id: purchase.id,
-                    user: purchase.user,
-                    total: purchase.total,
-                    status: purchase.status,
-                    purchase_date: purchase.purchase_date,
-                    details: details
-                };
-            })
-        );
-
-        res.json(purchasesWithDetails);
+        res.json(purchases);
 
     } catch (err) {
         console.error('Error retrieving purchases', err);
@@ -599,31 +571,7 @@ app.get("/api/purchases/:id", async (req, res) => {
 
         const purchase = purchases[0];
 
-        // Obtener los detalles de la compra
-        const [details] = await pool.query(`
-            SELECT 
-                pd.id,
-                pd.product_id,
-                pr.name as product,
-                pd.quantity,
-                pd.price,
-                pd.subtotal
-            FROM purchase_details pd
-            LEFT JOIN products pr ON pd.product_id = pr.id
-            WHERE pd.purchase_id = ?
-            ORDER BY pd.id
-        `, [purchaseId]);
-
-        const purchaseWithDetails = {
-            id: purchase.id,
-            user: purchase.user,
-            total: purchase.total,
-            status: purchase.status,
-            purchase_date: purchase.purchase_date,
-            details: details
-        };
-
-        res.json(purchaseWithDetails);
+        res.json(purchase);
 
     } catch (err) {
         console.error('Error retrieving purchase', err);
