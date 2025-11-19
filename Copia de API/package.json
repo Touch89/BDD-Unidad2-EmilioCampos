@@ -3,12 +3,17 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js",
+    "dev": "node index.js",
+    "test": "node test-connection.js",
+    "docker:up": "docker-compose up -d mysql-db",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker logs mysql-api-db"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "",
+  "description": "API REST con MySQL local",
   "dependencies": {
     "axios": "^1.13.2",
     "express": "^5.1.0",

@@ -9,10 +9,11 @@ const mysql = require('mysql2/promise');
 
 // Crea una pool de conexiones con la información de tu base de datos
 const pool = mysql.createPool({
-    host: 'database-emilio-campos.cx8w0m66yrcx.us-east-2.rds.amazonaws.com',
-    user: 'admin',
-    password: 'YokedSkate62',
-    database: 'tarea_api'
+    host: process.env.DB_HOST || 'localhost',
+    user: process.env.DB_USER || 'api_user',
+    password: process.env.DB_PASSWORD || 'api_password',
+    database: process.env.DB_NAME || 'tarea_api',
+    port: process.env.DB_PORT || 3307
 });
 
 app.get('/', (req, res) => {
